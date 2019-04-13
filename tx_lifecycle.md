@@ -10,15 +10,15 @@ We use `transaction` as a blanket term for anything that will change the current
 1. **State Changes:** The nodes running the application process the block’s transactions in order, deterministically committing to the new state of the application.
 
 ## Key Components
-* The **ABCI** is an interface that allows for compatibility with nodes running Tendermint Core: nodes don’t need to know anything about the application but can easily query state, validate transactions, and execute transactions. Applications implement this interface.
-* Applications built on the Cosmos SDK inherit from **BaseApp**, which implements ABCI for them provided the application implements specified interfaces. [BaseApp](https://github.com/cosmos/cosmos-sdk/blob/cec3065a365f03b86bc629ccb6b275ff5846fdeb/baseapp/baseapp.go) includes, among other things, a Router to direct messages to their respective modules, Multistore to handle internal state, and Handlers to implement the necessary logic for checking and executing transactions.
+* The **ABCI** is an interface that allows for compatibility with nodes running Tendermint Core: nodes don’t need to know anything about the application but can easily query state, validate transactions, and execute transactions. All applications built on the SDK should implement this interface.
+* Applications built on the SDK inherit from **BaseApp**, which implements ABCI for them provided the application implements specified interfaces. [BaseApp](https://github.com/cosmos/cosmos-sdk/blob/cec3065a365f03b86bc629ccb6b275ff5846fdeb/baseapp/baseapp.go) includes, among other things, a Router to direct messages to their respective modules, `Multistore` to handle internal state, and Handlers to implement the necessary logic for checking and executing transactions.
 * **Internal state** is represented in a collection of `KVStores` each handled by a different module: e.g. if there is a currency, an [auth](https://github.com/cosmos/cosmos-sdk/tree/develop/x/auth) module may keep track of keys and a [bank](https://github.com/cosmos/cosmos-sdk/tree/develop/x/bank) module may keep track of account balances. There exist three distinct, simultaneous internal states during any given round that are synchronized after the completion of every Commit:
-    * `CheckTxState` is maintained by the Mempool Connection and modified every time a transaction is validated.
-    * `DeliverTxState` is maintained by the Consensus Connection and modified by transactions already committed in a block.
+    * `CheckTxState` is maintained by the Mempool Connection and modified every time a transaction is validated. Necessary because some transactions may be affected by preceding transactions in the same block.
+    * `DeliverTxState` is maintained by the Consensus Connection and only modified by transactions already committed in a block.
     * `QueryState` is maintained by the Query connection and used to query the last committed state.
 ## Transaction Lifecycle
 ### Creation
-Transactions are technically only touched by the SDK; it wraps and unwraps `Msgs` into transactions. An application developer defines `Msgs` by implementing an interface. A user of the application sends `Msgs` and provides maximum amount of gas to be spent `GasWanted`. The originator of the transaction is a node that broadcasts the transaction, represented as a `[] bytes`, to its peers.
+An application developer defines `Msgs` by implementing the `Msg` interface; the `Msgs` are bundled into transactions by the SDK. A user of the application sends `Msgs` and provides a maximum amount of gas to be spent, `GasWanted`. The node from which a transaction originates broadcasts the transaction, represented as a `[] bytes`, to its peers.
 ```go
 // Transactions messages must fulfill the Msg
 type Msg interface {
@@ -109,7 +109,7 @@ func (app *BaseApp) CheckTx(txBytes []byte) (res abci.ResponseCheckTx) {
 }
 ```
 
-`CheckTx` is handled by the **AnteHandler**, provided by BaseApp. Only the `checkTxState` is modified here and persists throughout this round’s series of `CheckTxs`; no actual state transitions happen yet. It also returns an estimated gas cost.
+`CheckTx` is handled by the **AnteHandler**. Only the `checkTxState` is modified here and persists throughout this round’s series of `CheckTxs`; no actual state transitions happen yet. It also returns an estimated gas cost.
 
 Tendermint enforces a maximum `GasWanted` per block; the application enforces that it is sufficient for `GasUsed`, i.e. enough funds are provided.
 
@@ -156,7 +156,7 @@ func (app *BaseApp) DeliverTx(txBytes []byte) (res abci.ResponseDeliverTx) {
 }
 ```
 
-On the application side, both the **AnteHandler** and **MsgHandler** are run. It is possible for a transaction to have been invalid even though the proposer should have rejected it prior to inclusion in the block; if `CheckTx` does not pass here, it aborts without writing state changes.
+On the application side, both the **AnteHandler** and **MsgHandler** are run. It is possible for a transaction to have been invalid even though the proposer should have rejected it prior to inclusion in the block; if `CheckTx` does not pass here, it aborts without writing state changes for any of the internal states.
 
 `BlockGasMeter` is used to keep track of how much gas is left for each transaction; `GasUsed` is deducted from it and returned in the Response. If `BlockGasMeter` runs out, the execution is terminated. If there is gas leftover after execution, it is returned to the user.
 
@@ -204,7 +204,7 @@ func (app *BaseApp) runTx(mode runTxMode, txBytes []byte, tx sdk.Tx) (result sdk
 }
 ```
 
-Since the SDK has a modular design, each transaction may have `Msgs` that need to be handled by different modules. BaseApp includes a **Router** [interface](https://github.com/cosmos/cosmos-sdk/blob/59765cecb11612a85d15acceb73bea677953057c/baseapp/router.go) and each `Msg` must implement a `Route` function to return the name of the module to route the message to. 
+Since the SDK has a modular design, the `Msgs` may need to be handled by different modules. BaseApp includes a **Router** [interface](https://github.com/cosmos/cosmos-sdk/blob/59765cecb11612a85d15acceb73bea677953057c/baseapp/router.go) and each `Msg` must implement a `Route` function to return the name of the module to route the message to. 
 
 #### EndBlock
 `EndBlock` is always run at the end of the block and allows for automatic function calls (sparingly to avoid getting into infinite loops). More importantly, this function allows changes to the validator set by returning ValidatorUpdate objects or governnace changes by returning ConsensusParams.
