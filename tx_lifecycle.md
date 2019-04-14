@@ -1,6 +1,6 @@
 # Transaction Lifecycle
 
-We use `transaction` as a blanket term for anything that will change the current state of the state machine. Not all transactions are transfers of tokens, and each wraps multiple `Msgs` specified by the application developer.
+We use `transaction` as a blanket term for any user messages that will change the current state of the state machine. Not all transactions are transfers of tokens, and each wraps multiple `Msgs` specified by the application developer.
 
 
 ## High Level Overview
@@ -10,7 +10,7 @@ We use `transaction` as a blanket term for anything that will change the current
 1. **State Changes:** The nodes running the application process the block’s transactions in order, deterministically committing to the new state of the application.
 
 ## Key Components
-* The **ABCI** is an interface that allows for compatibility with nodes running Tendermint Core: nodes don’t need to know anything about the application but can easily query state, validate transactions, and execute transactions. All applications built on the SDK should implement this interface.
+* **ABCI** is an interface that allows for compatibility with nodes running Tendermint Core: nodes don’t need to know anything about the application but can easily query state, validate transactions, and execute transactions. All applications built on the SDK should implement this interface.
 * Applications built on the SDK inherit from **BaseApp**, which implements ABCI for them provided the application implements specified interfaces. [BaseApp](https://github.com/cosmos/cosmos-sdk/blob/cec3065a365f03b86bc629ccb6b275ff5846fdeb/baseapp/baseapp.go) includes, among other things, a Router to direct messages to their respective modules, `Multistore` to handle internal state, and Handlers to implement the necessary logic for checking and executing transactions.
 * **Internal state** is represented in a collection of `KVStores` each handled by a different module: e.g. if there is a currency, an [auth](https://github.com/cosmos/cosmos-sdk/tree/develop/x/auth) module may keep track of keys and a [bank](https://github.com/cosmos/cosmos-sdk/tree/develop/x/bank) module may keep track of account balances. There exist three distinct, simultaneous internal states during any given round that are synchronized after the completion of every Commit:
     * `CheckTxState` is maintained by the Mempool Connection and modified every time a transaction is validated. Necessary because some transactions may be affected by preceding transactions in the same block.
@@ -113,13 +113,13 @@ func (app *BaseApp) CheckTx(txBytes []byte) (res abci.ResponseCheckTx) {
 
 Tendermint enforces a maximum `GasWanted` per block; the application enforces that it is sufficient for `GasUsed`, i.e. enough funds are provided.
 
-Nodes also keep a **Mempool cache**: each may keep 0 or more of the most recent transactions. It is not functionally necessary but used to prevent replay attacks.
+Nodes also keep a **Mempool cache**: each may keep 0 or more of the most recent transactions. Thus, the transaction may pass through a node's Mempool cache check before CheckTx. The Mempool Cache is not functionally necessary; it is mostly used to prevent DOS attacks.
 ### Consensus
 Now we are entirely in the realm of Tendermint Core. The proposer designated for this round of consensus accumulates transactions it has seen and verified (assuming it is honest) in the block. The network goes through the pre-vote and pre-commit stages. Abstracting away some of the details of [Tendermint BFT Consensus](https://tendermint.com/docs/spec/consensus/consensus.html#terms), with 2/3 approval (by voting power) from the validators, the block is committed.
 ### State Changes
 The **Commit** Phase of consensus actually includes many steps, including the execution of each transaction’s action, before the state changes are committed. The following ABCI methods implemented by the application are requested, in order. Each is a Request sent to the application and returns a Response.
 
-The Consensus Connection described by the [ABCI](https://github.com/tendermint/tendermint/blob/75ffa2bf1c7d5805460d941a75112e6a0a38c039/abci/types/application.go#L11-L26
+The Consensus Connection described by [ABCI](https://github.com/tendermint/tendermint/blob/75ffa2bf1c7d5805460d941a75112e6a0a38c039/abci/types/application.go#L11-L26
 ).
 ```go
 type Application interface {
