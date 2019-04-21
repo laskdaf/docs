@@ -5,8 +5,7 @@ The [Cosmos SDK](https://github.com/cosmos/cosmos-sdk) helps you create a blockc
 
 A [**transaction**](https://github.com/tendermint/tendermint/blob/master/types/tx.go) is comprised of user messages that will change the current state of the state machine and metadata. Not all transactions are transfers of tokens; they are specific to an application and thus can involve many types of state changes.
 
-A [**block**](https://github.com/tendermint/tendermint/blob/master/types/block.go) is a unit of information; multiple blocks are committed and linked in chronological order to form the blockchain. Blocks are comprised of a list of transactions, metadata, and data to enable properties of the blockchain.
-
+A [**block**](https://github.com/tendermint/tendermint/blob/master/types/block.go) is a unit of information; multiple blocks are committed and linked in chronological order to form the blockchain. Blocks are comprised of a list of transactions, metadata, and information to enable security properties of the blockchain such as the last commit and evidence on malicious activity by validators.
 
 ## High Level Overview
 The transaction goes through several steps in order to be included in a block and its state changes committed by the application. The goal of the protocols is to ensure that only valid transactions approved by the network are committed, and that all nodes running the application agree on the next state. 
@@ -141,7 +140,7 @@ func (msg MsgBuyName) GetSigners() []sdk.AccAddress {
 The node from which a transaction originates broadcasts the transaction, represented as a `[] bytes`, to its peers.
 
 ### Addition to Mempool
-Full-nodes in the network receive transactions from their peers, and validate them locally before including them into the [Mempool](https://github.com/tendermint/tendermint/blob/75ffa2bf1c7d5805460d941a75112e6a0a38c039/mempool/mempool.go). An ABCI procedure, `CheckTX`, is utilized (see below for code). The transaction is unwrapped into its comprising `Msgs` and `validateBasic`, a stateless validation function implemented by all `Msgs`, is run on each one.  The default is for all nodes to broadcast via gossip all of the transactions that pass `CheckTx` and meet the  gas requirements. Tendermint handles the [peer-to-peer communication](https://github.com/tendermint/tendermint/tree/4a568fcedb09493567b293a52c6c42f8d40076c7/p2p).
+Before putting transactions into a block, nodes first perform sanity checks and filter out invalid transactions. Full-nodes in the network receive transactions from their peers and validate them locally before including them into the [Mempool](https://github.com/tendermint/tendermint/blob/75ffa2bf1c7d5805460d941a75112e6a0a38c039/mempool/mempool.go), their pool of transactions approved for inclusion in a block. An ABCI procedure, `CheckTX`, is utilized (see below for code) for validation. The transaction is unwrapped into its comprising `Msgs` and `validateBasic`, a stateless validation function implemented by all `Msgs`, is run on each one. The default is for all nodes to broadcast via gossip all of the transactions that pass `CheckTx` and meet the  gas requirements. Tendermint handles the [peer-to-peer communication](https://github.com/tendermint/tendermint/tree/4a568fcedb09493567b293a52c6c42f8d40076c7/p2p).
 
 Here is `CheckTx` as implemented in BaseApp. First, the application method `txDecoder` is run to decode `[] bytes` into a transaction. Then, if there is no error, [runTx](https://github.com/cosmos/cosmos-sdk/blob/9036430f15c057db0430db6ec7c9072df9e92eb2/baseapp/baseapp.go#L814-L855) in the Check mode is run on the transaction: it simply runs `validateBasic` and **AnteHandler**, which returns the Result. 
 ```go
@@ -168,17 +167,41 @@ func (app *BaseApp) CheckTx(txBytes []byte) (res abci.ResponseCheckTx) {
 ```
 Only the `checkTxState` is modified here and persists throughout this round’s series of `CheckTxs`. No committed state transitions have happened yet - in fact, as each node is running this locally, each may have a different `checkTxState` from other nodes in the network. This will be fixed soon.
 Included in the Result is an estimated gas cost. The application enforces that `GasWanted` is sufficient for `GasUsed`, i.e. enough funds are provided to complete execution of the transaction.
-Nodes also keep a **Mempool cache**: each may keep 0 or more of the most recent transactions. Thus, the transaction may pass through a node's Mempool cache check before CheckTx.
+Nodes also keep a **Mempool cache**: each may keep 0 or more of the most recent transactions in order to prevent DOS attacks. Thus, the transaction may pass through a node's Mempool cache check before CheckTx.
 ### Consensus
 Now we are entirely in the realm of Tendermint Core, and this step is only executed by the [validators](https://github.com/tendermint/tendermint/blob/master/types/validator.go). The proposer (presumably honest) designated for this round of consensus accumulates transactions it has seen and verified in the block. Abstracting away the details of [Tendermint BFT Consensus](https://tendermint.com/docs/spec/consensus/consensus.html#terms), with 2/3 approval from the validators, the block is committed.
 
 ![alt text](https://tendermint.com/docs/assets/img/consensus_logic.e9f4ca6f.png)
 ### State Changes
 The **Commit** phase of consensus finalizes the order of transactions, but the distributed execution of each transaction’s action is necessary before the state changes are committed. The following ABCI methods implemented by the application are run, in order, by every node in the network upon receiving a valid block.
+		-----------------------		
+		| BeginBlock	      |        
+		-----------------------		
+		          |		
+			  v			
+		-----------------------		    
+		| DeliverTx(tx0)      |  
+		| DeliverTx(tx1)      |   	  
+		| DeliverTx(tx2)      |  
+		| DeliverTx(tx3)      |  
+		|	.	      |  
+		|	.	      | 
+		|	.	      | 
+		-----------------------		
+		          |			
+			  v			
+		-----------------------	
+		| EndBlock	      |         
+		-----------------------	
+		          |			
+			  v			
+		-----------------------	
+		| Commit	      |         
+		-----------------------	
 #### BeginBlock
-BeginBlock communicates information such as block `header`, `hash`, `LastCommitInfo`, and `ByzantineValidators` to the application. The application may use this information in execution, to determine validator rewards/punishments or determine changes to the validator set. For example, it may decide to slash malicious validators. No transactions are handled here.
+BeginBlock is run first, and communicates important information such as block `header`, `hash`, `LastCommitInfo`, and `ByzantineValidators` to the nodes running the application. The nodes may use this information in execution, to determine validator rewards/punishments or determine changes to the validator set. For example, it may decide to slash malicious validators. No transactions are handled here.
 #### DeliverTx
-The`DeliverTx` for all transactions in the block are run in sequential order as agreed upon by the block and processed by all the nodes maintaining the state machine for the application. Note that, while each node is running these locally, since the state transitions for each transaction are deterministic, this should yield a single, unambiguous result across all nodes.
+The purpose of DeliverTx is to determine the output of running the transactions in the agreed-upon order. The`DeliverTx` for all transactions in the block are run in sequential order as agreed upon by the block and processed by all the nodes maintaining the state machine for the application. Note that, while each node is running these locally, since the state transitions for each transaction are deterministic, this should yield a single, unambiguous result across all nodes.
 
 Here is `DeliverTx` as implemented in BaseApp. Note that it is extremely similar to `CheckTx` except for the argument `runTxModeDeliver` instead of `runTxModeCheck`. This means that `runTx` will not halt after running anteHandler, and will continue with msgHandler. 
 ```go
@@ -247,10 +270,10 @@ It is possible for a transaction to have been invalid even though the proposer s
 `BlockGasMeter` is used to keep track of how much gas is left for each transaction; `GasUsed` is deducted from it and returned in the Response. If `BlockGasMeter` runs out, the execution is terminated. If there is gas leftover after execution, it is returned to the user.
 
 #### EndBlock
-[`EndBlock`](https://github.com/cosmos/cosmos-sdk/blob/9036430f15c057db0430db6ec7c9072df9e92eb2/baseapp/baseapp.go#L875-L886) is always run at the end of the block and allows for automatic function calls (sparingly to avoid getting into infinite loops). More importantly, this function allows changes to the validator set or governance by changing [parameters](https://github.com/tendermint/tendermint/blob/0d985ede28bd6937fa9d3613618e42cab6fc871c/types/params.go#L17-L23).
+[`EndBlock`](https://github.com/cosmos/cosmos-sdk/blob/9036430f15c057db0430db6ec7c9072df9e92eb2/baseapp/baseapp.go#L875-L886) is always run at the end of the block and allows for automatic function calls (sparingly to avoid getting into infinite loops). An important purpose of EndBlock is to allow changes to the validator set or governance by changing [parameters](https://github.com/tendermint/tendermint/blob/0d985ede28bd6937fa9d3613618e42cab6fc871c/types/params.go#L17-L23).
 
 #### Commit
-The application's `Commit` method is run. After the state changes are made, a new state root should be sent back to serve as merkle proof for state change. 
+The application's `Commit` method is run in order to finalize the state changes made by executing this block's transactions. After the state changes are made, a new state root should be sent back to serve as merkle proof for state change. 
 Here is `Commit` as implemented in [BaseApp](https://github.com/cosmos/cosmos-sdk/blob/cec3065a365f03b86bc629ccb6b275ff5846fdeb/baseapp/baseapp.go#L888-L912). It synchronizes all the states by writing the `deliverTxState` into the application's internal state, updating both `checkTxState` and `deliverTxState` afterward.:
 ```go
 
