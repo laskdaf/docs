@@ -14,7 +14,8 @@ The transaction goes through several steps in order to be included in a block an
 3. **Consensus:** The Proposer of the current round accumulates transactions into a block and validators in the network execute Tendermint BFT consensus to commit that block, thereby committing to the order of the transactions.
 4. **State Changes:** The full-nodes running the application process the block’s transactions in order locally, deterministically committing to the new state of the application.
 These steps, illustrated below, are executed separately by nodes in the network. The result is an agreed-upon state change. 
-					
+
+```				
 		-----------------------	
 		|		      | 
 		|      Creation       |    
@@ -41,7 +42,7 @@ Validators	|		      |
 		|    State Changes    |  
 Full-Nodes	|		      |  
 		-----------------------	
-		
+```		
 		
 ## Key Components
 A few key components are necessary to understand a transaction's lifecycle and develop an application accordingly: how the application connects with Tendermint and how internal state is handled at each step in the transaction's lifecycle. 
