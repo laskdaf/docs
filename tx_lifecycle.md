@@ -14,7 +14,35 @@ The transaction goes through several steps in order to be included in a block an
 3. **Consensus:** The Proposer of the current round accumulates transactions into a block and validators in the network execute Tendermint BFT consensus to commit that block, thereby committing to the order of the transactions.
 4. **State Changes:** The full-nodes running the application process the block’s transactions in order locally, deterministically committing to the new state of the application.
 These steps, illustrated below, are executed separately by nodes in the network. The result is an agreed-upon state change. 
-![alt text](https://tendermint.com/docs/assets/img/abci.3542de28.png)
+					
+		-----------------------	
+		|		      | 
+		|      Creation       |    
+      User	|		      |  
+		-----------------------		
+		          |		
+			  v			
+		-----------------------	
+		|		      | 
+		| Addition to Mempool |
+Full-Nodes	|		      |  
+		-----------------------		
+		          |			
+			  v			
+		-----------------------	
+		|		      |
+		|     Consensus	      |  
+Validators	|		      |  
+		-----------------------	
+		          |			
+			  v			
+		-----------------------	
+		|		      |
+		|    State Changes    |  
+Full-Nodes	|		      |  
+		-----------------------	
+		
+		
 ## Key Components
 A few key components are necessary to understand a transaction's lifecycle and develop an application accordingly: how the application connects with Tendermint and how internal state is handled at each step in the transaction's lifecycle. 
 * [**ABCI**](https://github.com/tendermint/tendermint/tree/013b9cef642f875634c614019ab13b17570778ad/abci) is an interface between Tendermint and the application. Nodes can run a general protocol and easily query state, validate transactions, and execute transactions for various applications. On the other hand, all applications that implement this interface can utilize Tendermint. 
