@@ -40,7 +40,17 @@ In most cases, instead of Store, the interface implemented is a [KVStore](https:
 ## Implementation
 ### Existing Stores
 There are a few [stores](https://github.com/cosmos/cosmos-sdk/tree/9a16e2675f392b083dd1074ff92ff1f9fbda750d/store) in the SDK that implement the Multistore interface, each with varying functionalities and purposes.
-Todo: describe one.
+
+### IAVL 
+One example is [IAVL](https://github.com/cosmos/cosmos-sdk/blob/master/store/iavl/store.go), which implements the `KVStore` and  `CommitStore` interfaces, enables ABCI queries, and is structured as a self-balancing Merkle Tree. Information on the underlying IAVL tree can be found [here](github.com/tendermint/iavl). Read this doc further for how the IAVL Store implements the Multistore interfaces.
+
+To implement a `Committer` for CommitStore, it obtains the current `hash` (which is the merkle root) and `version` of the underlying IAVL tree by calling [`SaveVersion`](https://github.com/tendermint/iavl/blob/de0740903a67b624d887f9055d4c60175dcfa758/mutable_tree.go#L320-L364) and returns it as a CommitID. The `LastCommitID` is retrieved simply by getting the tree's currently saved hash and version instead of calculating a new one.
+
+To implement the `Store`, it returns `StoreTypeIAVL` as the StoreType and creates a new store as a copy of the current one in order to Cache Wrap.
+
+To implement `KVStore`, it uses the underlying IAVL tree's `Set`, `Get`, `Has` and `Remove`, and defines an [IAVLIterator](https://github.com/cosmos/cosmos-sdk/blob/f4a96fd6b65ff24d0ccfe55536a2c3d6abe3d3fa/store/iavl/store.go#L256-L283) used to iterate through the data structure.
+
+The IAVL Store also defines a [`Query`](https://github.com/cosmos/cosmos-sdk/blob/f4a96fd6b65ff24d0ccfe55536a2c3d6abe3d3fa/store/iavl/store.go#L178-L252) function to implement the ABCI interface. The interaction starts with a [`Request`](https://github.com/tendermint/tendermint/blob/4514842a631059a4148026ebce0e46fdf628f875/abci/types/types.pb.go) sent to the Store and ends with the Store outputting a [`Response`](https://github.com/tendermint/tendermint/blob/4514842a631059a4148026ebce0e46fdf628f875/abci/types/types.pb.go). `Query` first sets which height it will query the tree for, then gets the data appropriate for what the Request is asking for. It could ask for the value corresponding to a certain `Key`, as well as the Merkle Proof for it, or it may ask for `subspace`, which is the list of all `KVPairs` with a certain prefix. 
 
 ### BaseApp Usage
 [BaseApp](https://github.com/cosmos/cosmos-sdk/blob/master/baseapp/baseapp.go), which implements basic functionalities for an ABCI application including stores, uses a [CommitMultiStore](https://github.com/cosmos/cosmos-sdk/blob/36dcd7b7ad94cf59a8471506e10b937507d1dfa5/store/types/store.go#L74-L98) (More about BaseApp can be found in [this doc](https://cosmos.network/docs/concepts/baseapp.html#baseapp)). Any application can use BaseApp. To initialize stores, the application can use [MountStores](https://github.com/cosmos/cosmos-sdk/blob/5344e8d768f306c29eb5451177499bfe540a80e9/baseapp/baseapp.go#L134-L153): the function takes as input any number of keys and, optionally, a already-existing database can be provided. Depending on the type of store the key is used for (IAVL, DB, or Transient), BaseApp will mount the stores and link the keys for access. The application is able to set the tracer, load the latest version, query the latest CommitID, set checkState, etc. by interfacing with BaseApp.
